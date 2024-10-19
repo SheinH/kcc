@@ -21,6 +21,7 @@
 import io
 import os
 import mozjpeg_lossless_optimization
+import subprocess
 from PIL import Image, ImageOps, ImageStat, ImageChops, ImageFilter
 from .shared import md5Checksum
 
@@ -145,13 +146,14 @@ class ComicPageParser:
             else:
                 pageone = self.image.crop(leftbox)
                 pagetwo = self.image.crop(rightbox)
-            new_image = Image.new("RGB", (int(width / 2), int(height*2)))
+            new_image = Image.new("RGB", (int(width / 2), int(height * 2)))
             new_image.paste(pageone, (0, 0))
             new_image.paste(pagetwo, (0, height))
             self.payload.append(['N', self.source, new_image, self.color, self.fill])
         elif (width > height) != (dstwidth > dstheight) and width <= dstheight and height <= dstwidth \
                 and not self.opt.webtoon and self.opt.splitter == 1:
-            self.payload.append(['R', self.source, self.image.rotate(90, Image.Resampling.BICUBIC, True), self.color, self.fill])
+            self.payload.append(
+                ['R', self.source, self.image.rotate(90, Image.Resampling.BICUBIC, True), self.color, self.fill])
         elif (width > height) != (dstwidth > dstheight) and not self.opt.webtoon:
             if self.opt.splitter != 1:
                 if width > height:
@@ -170,7 +172,7 @@ class ComicPageParser:
                 self.payload.append(['S2', self.source, pagetwo, self.color, self.fill])
             if self.opt.splitter > 0:
                 self.payload.append(['R', self.source, self.image.rotate(90, Image.Resampling.BICUBIC, True),
-                                    self.color, self.fill])
+                                     self.color, self.fill])
         else:
             self.payload.append(['N', self.source, self.image, self.color, self.fill])
 
@@ -271,8 +273,36 @@ class ComicPage:
                 flags.append('BlackBackground')
             if self.opt.forcepng:
                 self.image.info["transparency"] = None
+                png_buffer = io.BytesIO()
+                self.image.save(png_buffer, format='PPM', optimize=False, compress_level=0)
+                png_buffer.seek(0)
                 self.targetPath += '.png'
-                self.image.save(self.targetPath, 'PNG', optimize=1)
+                command = [
+                    "magick",
+                    "-",
+                    "-colorspace",
+                    "gray",
+                    "-depth",
+                    "4",
+                    "-dither",
+                    "FloydSteinberg",
+                    self.targetPath,
+                ]
+
+                try:
+                    # Run cwebp, passing the PNG data via stdin
+                    result = subprocess.run(
+                        command,
+                        input=png_buffer.getvalue(),
+                        check=True,
+                        capture_output=True,
+                        text=False
+                    )
+                except subprocess.CalledProcessError as e:
+                    print("Conversion failed!")
+                    print(f"Error: {e}")
+                    print(f"Error output: {e.stderr}")
+
             else:
                 self.targetPath += '.jpg'
                 if self.opt.mozjpeg:
@@ -284,6 +314,7 @@ class ComicPage:
                             output_jpeg_file.write(output_jpeg_bytes)
                 else:
                     self.image.save(self.targetPath, 'JPEG', optimize=1, quality=85)
+
             return [md5Checksum(self.targetPath), flags, self.orgPath]
         except IOError as err:
             raise RuntimeError('Cannot save image. ' + str(err))
@@ -320,27 +351,27 @@ class ComicPage:
         if self.opt.stretch:
             self.image = self.image.resize(self.size, method)
         elif method == Image.Resampling.BICUBIC and not self.opt.upscale:
-            if self.opt.format == 'CBZ' or self.opt.kfx:
-                borderw = int((self.size[0] - self.image.size[0]) / 2)
-                borderh = int((self.size[1] - self.image.size[1]) / 2)
-                self.image = ImageOps.expand(self.image, border=(borderw, borderh), fill=self.fill)
-                if self.image.size[0] != self.size[0] or self.image.size[1] != self.size[1]:
-                    self.image = ImageOps.fit(self.image, self.size, method=method)
-        else: # if image bigger than device resolution or smaller with upscaling
-            if abs(ratio_image - ratio_device) < AUTO_CROP_THRESHOLD:
+            print("notmy fix2!!")
+            borderw = int((self.size[0] - self.image.size[0]) / 2)
+            borderh = int((self.size[1] - self.image.size[1]) / 2)
+            self.image = ImageOps.expand(self.image, border=(borderw, borderh), fill=self.fill)
+            if self.image.size[0] != self.size[0] or self.image.size[1] != self.size[1]:
                 self.image = ImageOps.fit(self.image, self.size, method=method)
+        else:  # if image bigger than device resolution or smaller with upscaling
+            if self.rotated:
+                self.image = ImageOps.pad(self.image, self.size, method=method, color="white")
+            elif abs(ratio_image - ratio_device) < AUTO_CROP_THRESHOLD:
+                self.image = ImageOps.cover(self.image, self.size, method=method)
             elif self.opt.format == 'CBZ' or self.opt.kfx:
-                self.image = ImageOps.pad(self.image, self.size, method=method, color=self.fill)
+                self.image = ImageOps.cover(self.image, self.size, method=method)
             else:
+                print("notmy fix4!!")
                 if self.kindle_scribe_azw3:
                     self.size = (1860, 1920)
                 self.image = ImageOps.contain(self.image, self.size, method=method)
 
     def resize_method(self):
-        if self.image.size[0] <= self.size[0] and self.image.size[1] <= self.size[1]:
-            return Image.Resampling.BICUBIC
-        else:
-            return Image.Resampling.LANCZOS
+        return Image.Resampling.LANCZOS
 
     def getBoundingBox(self, tmptmg):
         min_margin = [int(0.005 * i + 0.5) for i in tmptmg.size]
