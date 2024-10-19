@@ -287,6 +287,8 @@ class ComicPage:
                     "4",
                     "-dither",
                     "FloydSteinberg",
+                    "-compress",
+                    "Zip",
                     self.targetPath,
                 ]
 
