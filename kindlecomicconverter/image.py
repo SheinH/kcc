@@ -363,7 +363,7 @@ class ComicPage:
             if self.image.size[0] != self.size[0] or self.image.size[1] != self.size[1]:
                 self.image = ImageOps.fit(self.image, self.size, method=method)
         else:  # if image bigger than device resolution or smaller with upscaling
-            if self.rotated:
+            if self.rotated or not self.cropped:
                 self.image = ImageOps.pad(self.image, self.size, method=method, color="white")
             elif abs(ratio_image - ratio_device) < AUTO_CROP_THRESHOLD:
                 self.image = ImageOps.cover(self.image, self.size, method=method)
@@ -383,6 +383,9 @@ class ComicPage:
         image_area = self.image.size[0] * self.image.size[1]
         if (box_area / image_area) >= minimum:
             self.image = self.image.crop(box)
+            self.cropped = True
+        else:
+            self.cropped = False
 
     def cropPageNumber(self, power, minimum):
         bbox = get_bbox_crop_margin_page_number(self.image, power, self.fill)
