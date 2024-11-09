@@ -420,7 +420,7 @@ def buildOPF(dstdir, title, filelist, cover=None):
     f.close()
 
 
-def buildEPUB(path, chapternames, tomenumber):
+def buildEPUB(path, chapternames, tomenumber, ischunked):
     filelist = []
     chapterlist = []
     cover = None
@@ -517,7 +517,7 @@ def buildEPUB(path, chapternames, tomenumber):
                 chapterlist.append((dirpath.replace('Images', 'Text'), filelist[-1][1]))
                 chapter = True
     # Overwrite chapternames if tree is flat and ComicInfo.xml has bookmarks
-    if not chapternames and options.chapters:
+    if not chapternames and options.chapters and not ischunked:
         chapterlist = []
 
         global_diff = 0
@@ -739,7 +739,7 @@ def getComicInfo(path, originalpath):
                 options.authors.sort()
             else:
                 options.authors = ['KCC']
-        if xml.data['Bookmarks'] and options.batchsplit == 0:
+        if xml.data['Bookmarks']:
             options.chapters = xml.data['Bookmarks']
         if xml.data['Summary']:
             options.summary = hescape(xml.data['Summary'])
@@ -958,8 +958,7 @@ def makeParser():
                                    help="Full path to comic folder or file(s) to be processed.")
 
     main_options.add_argument("-p", "--profile", action="store", dest="profile", default="KV",
-                              help="Device profile (Available options: K1, K2, K34, K578, KDX, KPW, KPW5, KPW6, KCS12, KV, KO, "
-                                   "K11, KS, KoMT, KoG, KoGHD, KoA, KoAHD, KoAH2O, KoAO, KoN, KoC, KoCC, KoL, KoLC, KoF, KoS, KoE)"
+                              help=f"Device profile (Available options: {', '.join(image.ProfileData.Profiles.keys())})"
                                    " [Default=KV]")
     main_options.add_argument("-m", "--manga-style", action="store_true", dest="righttoleft", default=False,
                               help="Manga style (right-to-left reading and splitting)")
@@ -1047,16 +1046,15 @@ def checkOptions(options):
     options.kfx = False
     options.supportSyntheticSpread = False
     if options.format == 'Auto':
-        if options.profile in ['K1', 'K2', 'K34', 'K578', 'KPW', 'KPW5', 'KPW6', 'KCS12', 'KV', 'KO', 'K11', 'KS']:
-            options.format = 'MOBI'
-        elif options.profile in ['OTHER', 'KoMT', 'KoG', 'KoGHD', 'KoA', 'KoAHD', 'KoAH2O', 'KoAO',
-                                 'KoN', 'KoC', 'KoCC', 'KoL', 'KoLC', 'KoF', 'KoS', 'KoE']:
-            options.format = 'EPUB'
-        elif options.profile in ['KDX']:
+        if options.profile in ['KDX']:
             options.format = 'CBZ'
-    if options.profile in ['K1', 'K2', 'K34', 'K578', 'KPW', 'KPW5', 'KPW6', 'KCS12', 'KV', 'KO', 'K11', 'KS']:
+        elif options.profile in image.ProfileData.ProfilesKindle.keys():
+            options.format = 'MOBI'
+        else:
+            options.format = 'EPUB'
+    if options.profile in image.ProfileData.ProfilesKindle.keys():
         options.iskindle = True
-    elif options.profile in ['OTHER', 'KoMT', 'KoG', 'KoGHD', 'KoA', 'KoAHD', 'KoAH2O', 'KoAO', 'KoN', 'KoC', 'KoCC', 'KoL', 'KoLC', 'KoF', 'KoS', 'KoE']:
+    else:
         options.isKobo = True
     # Other Kobo devices probably support synthetic spreads as well, but
     # they haven't been tested.
@@ -1203,10 +1201,11 @@ def makeBook(source, qtgui=None):
             makeZIP(tome + '_comic', os.path.join(tome, "OEBPS", "Images"))
         else:
             print("Creating EPUB file...")
-            buildEPUB(tome, chapterNames, tomeNumber)
             if len(tomes) > 1:
+                buildEPUB(tome, chapterNames, tomeNumber, True)
                 filepath.append(getOutputFilename(source, options.output, '.epub', ' ' + str(tomeNumber)))
             else:
+                buildEPUB(tome, chapterNames, tomeNumber, False)
                 filepath.append(getOutputFilename(source, options.output, '.epub', ''))
             makeZIP(tome + '_comic', tome, True)
         copyfile(tome + '_comic.zip', filepath[-1])
@@ -1229,7 +1228,7 @@ def makeBook(source, qtgui=None):
                 print('Error: KindleGen failed to create MOBI!')
                 print(errors)
                 return filepath
-        k = kindle.Kindle()
+        k = kindle.Kindle(options.profile)
         if k.path and k.coverSupport:
             print("Kindle detected. Uploading covers...")
         for i in filepath:
@@ -1251,12 +1250,13 @@ def makeBook(source, qtgui=None):
 
 
 def makeMOBIFix(item, uuid):
+    is_pdoc = options.profile in image.ProfileData.ProfilesKindlePDOC.keys()
     if not options.keep_epub:
         os.remove(item)
     mobiPath = item.replace('.epub', '.mobi')
     move(mobiPath, mobiPath + '_toclean')
     try:
-        dualmetafix.DualMobiMetaFix(mobiPath + '_toclean', mobiPath, bytes(uuid, 'UTF-8'))
+        dualmetafix.DualMobiMetaFix(mobiPath + '_toclean', mobiPath, bytes(uuid, 'UTF-8'), is_pdoc)
         return [True]
     except Exception as err:
         return [False, format(err)]
