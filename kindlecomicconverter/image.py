@@ -375,19 +375,19 @@ class ComicPage:
             borderh = int((self.size[1] - self.image.size[1]) / 2)
             self.image = ImageOps.expand(self.image, border=(borderw, borderh), fill=self.fill)
             if self.image.size[0] != self.size[0] or self.image.size[1] != self.size[1]:
-                self.image = ImageOps.contain(self.image, self.size, method=method)
+                self.image = ImageOps.pad(self.image, self.size, method=method,color="white")
         else:  # if image bigger than device resolution or smaller with upscaling
             if self.rotated or self.under_crop_minimum:
-                self.image = ImageOps.contain(self.image, self.size, method=method)
+                self.image = ImageOps.pad(self.image, self.size, method=method,color="white")
             elif abs(ratio_image - ratio_device) < AUTO_CROP_THRESHOLD:
-                self.image = ImageOps.contain(self.image, self.size, method=method)
+                self.image = ImageOps.pad(self.image, self.size, method=method,color="white")
             elif self.opt.format == 'CBZ' or self.opt.kfx:
-                self.image = ImageOps.contain(self.image, self.size, method=method)
+                self.image = ImageOps.pad(self.image, self.size, method=method,color="white")
             else:
                 print("notmy fix4!!")
                 if self.kindle_scribe_azw3:
                     self.size = (1860, 1920)
-                self.image = ImageOps.contain(self.image, self.size, method=method)
+                self.image = ImageOps.pad(self.image, self.size, method=method,color="white")
 
     def resize_method(self):
         return Image.Resampling.LANCZOS
