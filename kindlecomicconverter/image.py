@@ -297,15 +297,12 @@ class ComicPage:
                 command = [
                     "magick",
                     "-",
-                    "-colorspace",
-                    "gray",
-                    "-depth",
-                    "4",
-                    "-dither",
-                    "FloydSteinberg",
-                    "-compress",
-                    "Zip",
-                    self.targetPath,
+                    "-colorspace", "gray",
+                    "-dither", "FloydSteinberg",
+                    "-colors", "16",
+                    "-depth", "4",
+                    "-compress", "Zip",
+                    self.targetPath
                 ]
 
                 try:
