@@ -342,28 +342,29 @@ class ComicPage:
                 borderh = int((self.size[1] - self.image.size[1]) / 2)
                 self.image = ImageOps.expand(self.image, border=(borderw, borderh), fill=self.fill)
                 if self.image.size[0] != self.size[0] or self.image.size[1] != self.size[1]:
-                    self.image = ImageOps.fit(self.image, self.size, method=method)
-        else: # if image bigger than device resolution or smaller with upscaling
-            if abs(ratio_image - ratio_device) < AUTO_CROP_THRESHOLD:
-                self.image = ImageOps.fit(self.image, self.size, method=method)
+                    self.image = ImageOps.pad(self.image, self.size, method=method)
+        else:  # if image bigger than device resolution or smaller with upscaling
+            if self.rotated or self.under_crop_minimum:
+                self.image = ImageOps.pad(self.image, self.size, method=method,color="white")
+            elif abs(ratio_image - ratio_device) < AUTO_CROP_THRESHOLD:
+                self.image = ImageOps.pad(self.image, self.size, method=method,color="white")
             elif self.opt.format == 'CBZ' or self.opt.kfx:
-                self.image = ImageOps.pad(self.image, self.size, method=method, color=self.fill)
+                self.image = ImageOps.pad(self.image, self.size, method=method,color="white")
             else:
                 if self.kindle_scribe_azw3:
                     self.size = (1860, 1920)
-                self.image = ImageOps.contain(self.image, self.size, method=method)
+                self.image = ImageOps.pad(self.image, self.size, method=method,color="white")
 
     def resize_method(self):
-        if self.image.size[0] <= self.size[0] and self.image.size[1] <= self.size[1]:
-            return Image.Resampling.BICUBIC
-        else:
-            return Image.Resampling.LANCZOS
+        return Image.Resampling.LANCZOS
 
     def maybeCrop(self, box, minimum):
         box_area = (box[2] - box[0]) * (box[3] - box[1])
         image_area = self.image.size[0] * self.image.size[1]
         if (box_area / image_area) >= minimum:
             self.image = self.image.crop(box)
+        else:
+            self.under_crop_minimum = True
 
     def cropPageNumber(self, power, minimum):
         bbox = get_bbox_crop_margin_page_number(self.image, power, self.fill)

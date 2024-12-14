@@ -612,6 +612,7 @@ def imgFileProcessing(work):
         workImg = image.ComicPageParser((dirpath, afile), opt)
         for i in workImg.payload:
             img = image.ComicPage(opt, *i)
+            img.under_crop_minimum = False
             if opt.cropping == 2 and not opt.webtoon:
                 img.cropPageNumber(opt.croppingp, opt.croppingm)
             if opt.cropping > 0 and not opt.webtoon:
@@ -1152,10 +1153,12 @@ def checkPre(source):
 def mogrifyTo4Bit(path):
     try:
         subprocess_run(['mogrify',
-                       '-colors', '16',
-                       '-depth', '4',
-                       '-compress', 'Zip',
-                       os.path.join(path, '*')], stdout=PIPE, stderr=STDOUT)
+                        "-colorspace", "gray",
+                        "-dither", "FloydSteinberg",
+                        "-colors", "16",
+                        "-depth", "4",
+                        "-compress", "Zip",
+                        os.path.join(path, '*')], stdout=PIPE, stderr=STDOUT)
     except Exception as err:
         raise RuntimeError('Failed to process images with mogrify: %s' % str(err))
 
