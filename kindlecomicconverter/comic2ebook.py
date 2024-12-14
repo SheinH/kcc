@@ -936,6 +936,7 @@ def slugify(value):
 
 
 def makeZIP(zipfilename, basedir, isepub=False):
+    mogrifyTo4Bit(basedir)
     zipfilename = os.path.abspath(zipfilename) + '.zip'
     zipOutput = ZipFile(zipfilename, 'w', ZIP_DEFLATED)
     if isepub:
@@ -1148,6 +1149,16 @@ def checkPre(source):
     except Exception:
         raise UserWarning("Target directory is not writable.")
 
+def mogrifyTo4Bit(path):
+    try:
+        subprocess_run(['mogrify',
+                       '-colors', '16',
+                       '-depth', '4',
+                       '-compress', 'Zip',
+                       os.path.join(path, '*')], stdout=PIPE, stderr=STDOUT)
+    except Exception as err:
+        raise RuntimeError('Failed to process images with mogrify: %s' % str(err))
+
 
 def makeBook(source, qtgui=None):
     global GUI
@@ -1204,6 +1215,7 @@ def makeBook(source, qtgui=None):
                 filepath.append(getOutputFilename(source, options.output, '.cbz', ' ' + str(tomeNumber)))
             else:
                 filepath.append(getOutputFilename(source, options.output, '.cbz', ''))
+
             makeZIP(tome + '_comic', os.path.join(tome, "OEBPS", "Images"))
         else:
             print("Creating EPUB file...")
