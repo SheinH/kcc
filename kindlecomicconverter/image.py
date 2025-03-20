@@ -20,11 +20,12 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 import io
 import os
+from pathlib import Path
 import mozjpeg_lossless_optimization
 import subprocess
 from PIL import Image, ImageOps, ImageStat, ImageChops, ImageFilter
-from .shared import md5Checksum
 from .page_number_crop_alg import get_bbox_crop_margin_page_number, get_bbox_crop_margin
+from .inter_panel_crop_alg import crop_empty_inter_panel
 
 AUTO_CROP_THRESHOLD = 0.015
 
@@ -120,9 +121,16 @@ class ProfileData:
         'KoE': ("Kobo Elipsa", (1404, 1872), Palette16, 1.8),
     }
 
+    ProfilesRemarkable = {
+        'Rmk1': ("reMarkable 1", (1404, 1872), Palette16, 1.8),
+        'Rmk2': ("reMarkable 2", (1404, 1872), Palette16, 1.8),
+        'RmkPP': ("reMarkable Paper Pro", (1620, 2160), Palette16, 1.8),
+    }
+
     Profiles = {
         **ProfilesKindle,
         **ProfilesKobo,
+        **ProfilesRemarkable,
         'OTHER': ("Other", (0, 0), Palette16, 1.8),
     }
 
@@ -134,7 +142,13 @@ class ComicPageParser:
         self.source = source
         self.size = self.opt.profileData[1]
         self.payload = []
-        self.image = Image.open(os.path.join(source[0], source[1])).convert('RGB')
+
+        # Detect corruption in source image, let caller catch any exceptions triggered.
+        srcImgPath = os.path.join(source[0], source[1])
+        self.image = Image.open(srcImgPath)
+        self.image.verify()
+        self.image = Image.open(srcImgPath).convert('RGB')
+
         self.color = self.colorCheck()
         self.fill = self.fillCheck()
         # backwards compatibility for Pillow >9.1.0
@@ -169,8 +183,10 @@ class ComicPageParser:
             self.payload.append(['N', self.source, new_image, self.color, self.fill])
         elif (width > height) != (dstwidth > dstheight) and width <= dstheight and height <= dstwidth \
                 and not self.opt.webtoon and self.opt.splitter == 1:
-            self.payload.append(
-                ['R', self.source, self.image.rotate(90, Image.Resampling.BICUBIC, True), self.color, self.fill])
+            spread = self.image
+            if not self.opt.norotate:
+                spread = spread.rotate(90, Image.Resampling.BICUBIC, True)
+            self.payload.append(['R', self.source, spread, self.color, self.fill])
         elif (width > height) != (dstwidth > dstheight) and not self.opt.webtoon:
             if self.opt.splitter != 1:
                 if width > height:
@@ -188,8 +204,11 @@ class ComicPageParser:
                 self.payload.append(['S1', self.source, pageone, self.color, self.fill])
                 self.payload.append(['S2', self.source, pagetwo, self.color, self.fill])
             if self.opt.splitter > 0:
-                self.payload.append(['R', self.source, self.image.rotate(90, Image.Resampling.BICUBIC, True),
-                                     self.color, self.fill])
+                spread = self.image
+                if not self.opt.norotate:
+                    spread = spread.rotate(90, Image.Resampling.BICUBIC, True)
+                self.payload.append(['R', self.source, spread,
+                                    self.color, self.fill])
         else:
             self.payload.append(['N', self.source, self.image, self.color, self.fill])
 
@@ -267,14 +286,14 @@ class ComicPage:
         self.rotated = False
         self.orgPath = os.path.join(path[0], path[1])
         if 'N' in mode:
-            self.targetPath = os.path.join(path[0], os.path.splitext(path[1])[0]) + '-KCC'
+            self.targetPath = os.path.join(path[0], os.path.splitext(path[1])[0]) + '-kcc'
         elif 'R' in mode:
-            self.targetPath = os.path.join(path[0], os.path.splitext(path[1])[0]) + '-KCC-A'
+            self.targetPath = os.path.join(path[0], os.path.splitext(path[1])[0]) + '-kcc-a'
             self.rotated = True
         elif 'S1' in mode:
-            self.targetPath = os.path.join(path[0], os.path.splitext(path[1])[0]) + '-KCC-B'
+            self.targetPath = os.path.join(path[0], os.path.splitext(path[1])[0]) + '-kcc-b'
         elif 'S2' in mode:
-            self.targetPath = os.path.join(path[0], os.path.splitext(path[1])[0]) + '-KCC-C'
+            self.targetPath = os.path.join(path[0], os.path.splitext(path[1])[0]) + '-kcc-c'
         # backwards compatibility for Pillow >9.1.0
         if not hasattr(Image, 'Resampling'):
             Image.Resampling = Image
@@ -330,8 +349,9 @@ class ComicPage:
                             output_jpeg_file.write(output_jpeg_bytes)
                 else:
                     self.image.save(self.targetPath, 'JPEG', optimize=1, quality=85)
-
-            return [md5Checksum(self.targetPath), flags, self.orgPath]
+            if os.path.isfile(self.orgPath):
+                os.remove(self.orgPath)
+            return [Path(self.targetPath).name, flags]
         except IOError as err:
             raise RuntimeError('Cannot save image. ' + str(err))
 
@@ -356,6 +376,14 @@ class ComicPage:
         self.image = self.image.convert('RGB')
         # Quantize is deprecated but new function call it internally anyway...
         self.image = self.image.quantize(palette=palImg)
+
+    def optimizeForDisplay(self, reducerainbow):
+        # Reduce rainbow artifacts for grayscale images by breaking up dither patterns that cause Moire interference with color filter array
+        if reducerainbow and not self.color:
+            unsharpFilter = ImageFilter.UnsharpMask(radius=1, percent=100)
+            self.image = self.image.filter(unsharpFilter)
+            self.image = self.image.filter(ImageFilter.BoxBlur(1.0))
+            self.image = self.image.filter(unsharpFilter)
 
     def resizeImage(self):
         # kindle scribe conversion to mobi is limited in resolution by kindlegen, same with send to kindle and epub
@@ -409,6 +437,8 @@ class ComicPage:
         if bbox:
             self.maybeCrop(bbox, minimum)
 
+    def cropInterPanelEmptySections(self, direction):
+        self.image = crop_empty_inter_panel(self.image, direction, background_color=self.fill)
 
 class Cover:
     def __init__(self, source, target, opt, tomeid):

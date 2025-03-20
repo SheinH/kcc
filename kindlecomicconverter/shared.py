@@ -18,6 +18,7 @@
 # PERFORMANCE OF THIS SOFTWARE.
 #
 
+from functools import lru_cache
 import os
 from hashlib import md5
 from html.parser import HTMLParser
@@ -49,7 +50,7 @@ class HTMLStripper(HTMLParser):
 def getImageFileName(imgfile):
     name, ext = os.path.splitext(imgfile)
     ext = ext.lower()
-    if (name.startswith('.') and len(name) == 1) or ext not in ['.png', '.jpg', '.jpeg', '.gif', '.webp']:
+    if (name.startswith('.') and len(name) == 1) or ext not in ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.jp2', '.j2k', '.jpx']:
         return None
     return [name, ext]
 
@@ -73,16 +74,6 @@ def walkLevel(some_dir, level=1):
         if num_sep + level <= num_sep_this:
             del dirs[:]
 
-
-def md5Checksum(fpath):
-    with open(fpath, 'rb') as fh:
-        m = md5()
-        while True:
-            data = fh.read(8192)
-            if not data:
-                break
-            m.update(data)
-        return m.hexdigest()
 
 
 def sanitizeTrace(traceback):
@@ -136,6 +127,19 @@ def dependencyCheck(level):
     if len(missing) > 0:
         print('ERROR: ' + ', '.join(missing) + ' is not installed!')
         sys.exit(1)
+
+@lru_cache
+def available_archive_tools():
+    available = []
+
+    for tool in ['tar', '7z', 'unar', 'unrar']:
+        try:
+            subprocess_run([tool], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            available.append(tool)
+        except FileNotFoundError:
+            pass
+    
+    return available
 
 def subprocess_run(command, **kwargs):
     if (os.name == 'nt'):

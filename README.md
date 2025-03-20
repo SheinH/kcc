@@ -5,11 +5,15 @@
 [![GitHub release](https://img.shields.io/github/release/ciromattia/kcc.svg)](https://github.com/ciromattia/kcc/releases)
 [![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/ciromattia/kcc/docker-publish.yml?label=docker%20build)](https://github.com/ciromattia/kcc/pkgs/container/kcc)
 
+**Kindle Comic Converter** optimizes comics and manga for eink readers like Kindle, Kobo, ReMarkable, and more. 
+Its main feature is various optional image processing steps to look good on eink screens, 
+which have different requirements than normal LCD screens.
+Supported input formats include folders/CBZ/CBR/PDF of JPG/PNG files and more.
+Supported output formats include MOBI/AZW3, EPUB, KEPUB, and CBZ.
 
-**Kindle Comic Converter** is a Python app to convert comic/manga files or folders to EPUB, Panel View MOBI or E-Ink optimized CBZ.
-It was initially developed for Kindle but since version 4.6 it outputs valid EPUB 3.0 so _**despite its name, KCC is
-actually a comic/manga to EPUB converter that every e-reader owner can happily use**_.
-It can also optionally optimize images by applying a number of transformations.
+![image](https://github.com/user-attachments/assets/36ad2131-6677-4559-bd6f-314a90c27218)
+
+YouTube tutorial (please subscribe): https://www.youtube.com/watch?v=IR2Fhcm9658
 
 ### A word of warning
 **KCC** _is not_ [Amazon's Kindle Comic Creator](http://www.amazon.com/gp/feature.html?ie=UTF8&docId=1001103761) nor is in any way endorsed by Amazon.
@@ -29,8 +33,12 @@ If you find **KCC** valuable you can consider donating to the authors:
   - [![Donate PayPal](https://img.shields.io/badge/Donate-PayPal-green.svg)](https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=YTTJ4LK2JDHPS)
   - [![Donate Bitcoin](https://img.shields.io/badge/Donate-Bitcoin-green.svg)](https://jastrzeb.ski/donate/)
 - Alex Xu (active 2023-Present)
-  - [![Donate PayPal](https://img.shields.io/badge/Donate-PayPal-green.svg)](https://www.paypal.com/donate/?business=QFJVE7A6LCP6U&no_recurring=0&item_name=Kindle+Comic+Converter&currency_code=USD)
 
+  [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/Q5Q41BW8HS)
+
+## Sponsors
+
+- Free code signing on Windows provided by [SignPath.io](https://about.signpath.io/), certificate by [SignPath Foundation](https://signpath.org/)
 
 ## DOWNLOADS
 
@@ -68,9 +76,11 @@ If you have issues detecting it, get stuck on the MOBI conversion step, or use L
 
 ### 7-Zip
 
-This is only required for certain files and advanced features. 
+This is optional but will make conversions much faster.
 
-KCC will ask you to install if needed. 
+This is required for certain files and advanced features. 
+
+KCC will ask you to install if needed.
 
 Refer to the wiki to install: https://github.com/ciromattia/kcc/wiki/Installation#7-zip
 
@@ -124,6 +134,9 @@ sudo apt-get install python3 p7zip-full python3-pil python3-psutil python3-slugi
         'KoF': ("Kobo Forma", (1440, 1920), Palette16, 1.8),
         'KoS': ("Kobo Sage", (1440, 1920), Palette16, 1.8),
         'KoE': ("Kobo Elipsa", (1404, 1872), Palette16, 1.8),
+        'Rmk1': ("reMarkable 1", (1404, 1872), Palette16, 1.8),
+        'Rmk2': ("reMarkable 2", (1404, 1872), Palette16, 1.8),
+        'RmkPP': ("reMarkable Paper Pro", (1620, 2160), Palette16, 1.8),
         'OTHER': ("Other", (0, 0), Palette16, 1.8),
 ```
 
@@ -137,7 +150,8 @@ MANDATORY:
 
 MAIN:
   -p PROFILE, --profile PROFILE
-                        Device profile (Available options: K1, K2, K34, K578, KDX, KPW, KPW5, KV, KO, K11, KS, KoMT, KoG, KoGHD, KoA, KoAHD, KoAH2O, KoAO, KoN, KoC, KoL, KoF, KoS, KoE) [Default=KV]
+                        Device profile (Available options: K1, K2, K34, K578, KDX, KPW, KPW5, KV, KO, K11, KS, KoMT, KoG, KoGHD, KoA, KoAHD, KoAH2O, KoAO, KoN, KoC, KoCC, KoL, KoLC, KoF, KoS, KoE)
+                        [Default=KV]
   -m, --manga-style     Manga style (right-to-left reading and splitting)
   -q, --hq              Try to increase the quality of magnification
   -2, --two-panel       Display two not four panels in Panel View mode
@@ -159,6 +173,8 @@ PROCESSING:
                         Set cropping power [Default=1.0]
   --cm CROPPINGM, --croppingminimum CROPPINGM
                         Set cropping minimum area ratio [Default=0.0]
+  --ipc INTERPANELCROP, --interpanelcrop INTERPANELCROP
+                        Crop empty sections. 0: Disabled 1: Horizontally 2: Both [Default=0]
   --blackborders        Disable autodetection and force black borders
   --whiteborders        Disable autodetection and force white borders
   --forcecolor          Don't convert images to grayscale
@@ -172,10 +188,16 @@ OUTPUT SETTINGS:
                         Output generated file to specified directory or file
   -t TITLE, --title TITLE
                         Comic title [Default=filename or directory name]
+  -a AUTHOR, --author AUTHOR
+                        Author name [Default=KCC]
   -f FORMAT, --format FORMAT
                         Output format (Available options: Auto, MOBI, EPUB, CBZ, KFX, MOBI+EPUB) [Default=Auto]
+  --nokepub             If format is EPUB, output file with '.epub' extension rather than '.kepub.epub'
   -b BATCHSPLIT, --batchsplit BATCHSPLIT
                         Split output into multiple files. 0: Don't split 1: Automatic mode 2: Consider every subdirectory as separate volume [Default=0]
+  --spreadshift         Shift first page to opposite side in landscape for two page spread alignment
+  --norotate            Do not rotate double page spreads in spread splitter option.
+  --reducerainbow       Reduce rainbow effect on color eink by slightly blurring images
 
 CUSTOM PROFILE:
   --customwidth CUSTOMWIDTH
@@ -220,6 +242,8 @@ If you want to edit the code, a good code editor is [VS Code](https://code.visua
 If you want to edit the `.ui` files, use [Qt Creator](https://www.qt.io/download-qt-installer-oss), included in **Qt for desktop development**.
 Then use the `gen_ui_files` scripts to autogenerate the python UI.
 
+An example PR adding a new checkbox is here: https://github.com/ciromattia/kcc/pull/785
+
 
 ### Windows install from source
 
@@ -238,6 +262,12 @@ venv\Scripts\activate.bat
 python kcc.py
 ```
 
+You can build a `.exe` of KCC like the downloads we offer with
+
+```
+python setup.py build_binary
+```
+
 ### macOS install from source
 
 One time setup and running for the first time:
@@ -253,6 +283,12 @@ Every time you close Terminal, you will need to reactivate the virtual environme
 ```
 source venv/bin/activate
 python kcc.py
+```
+
+You can build a `.app` of KCC like the downloads we offer with
+
+```
+python setup.py build_binary
 ```
 
 ## CREDITS
@@ -291,5 +327,5 @@ The app relies and includes the following scripts:
 Please check [wiki page](https://github.com/ciromattia/kcc/wiki/Known-issues).
 
 ## COPYRIGHT
-Copyright (c) 2012-2023 Ciro Mattia Gonano, Paweł Jastrzębski and Darodi.
+Copyright (c) 2012-2025 Ciro Mattia Gonano, Paweł Jastrzębski, Darodi and Alex Xu.
 **KCC** is released under ISC LICENSE; see [LICENSE.txt](./LICENSE.txt) for further details.
