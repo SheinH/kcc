@@ -28,7 +28,6 @@ If you can fix an open issue, fork & make a pull request.
 If you find **KCC** valuable you can consider donating to the authors:
 - Ciro Mattia Gonano (founder, active 2013-2014):
   - [![Donate PayPal](https://img.shields.io/badge/Donate-PayPal-green.svg)](https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=D8WNYNPBGDAS2)
-  - [![Donate Flattr](https://img.shields.io/badge/Donate-Flattr-green.svg)](http://flattr.com/thing/2260449/ciromattiakcc-on-GitHub)
 - Paweł Jastrzębski (active 2013-2019):
   - [![Donate PayPal](https://img.shields.io/badge/Donate-PayPal-green.svg)](https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=YTTJ4LK2JDHPS)
   - [![Donate Bitcoin](https://img.shields.io/badge/Donate-Bitcoin-green.svg)](https://jastrzeb.ski/donate/)
@@ -63,6 +62,9 @@ For flatpak, Docker, and AppImage versions, refer to the wiki: https://github.co
 - [Windows 7 support](https://github.com/ciromattia/kcc/issues/678)
 - [Combine files/chapters](https://github.com/ciromattia/kcc/issues/612#issuecomment-2117985011)
 - [Flatpak mobi conversion stuck](https://github.com/ciromattia/kcc/wiki/Installation#linux)
+- Image too dark?
+  - The default gamma correction of 1.8 makes the image darker, and is useful for faded/gray artwork/text. Disable by setting gamma = 1.0
+- [Better PDF support (Humble Bundle, Fanatical, etc)](https://github.com/ciromattia/kcc/issues/680)
 
 ## PREREQUISITES
 
