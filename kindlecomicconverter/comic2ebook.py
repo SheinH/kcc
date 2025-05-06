@@ -119,6 +119,8 @@ def buildHTML(path, imgfile, imgfilepath):
                   "</head>\n",
                   "<body style=\"" + additionalStyle + "\">\n",
                   "<div style=\"text-align:center;top:" + getTopMargin(deviceres, imgsizeframe) + "%;\">\n",
+                  # this display none div fixes formatting issues with virtual panel mode, for some reason
+                  '<div style="display:none;">.</div>\n',
                   "<img width=\"" + str(imgsizeframe[0]) + "\" height=\"" + str(imgsizeframe[1]) + "\" ",
                   "src=\"", "../" * backref, "Images/", postfix, imgfile, "\"/>\n</div>\n"])
     if options.iskindle and options.panelview:
@@ -614,7 +616,7 @@ def imgFileProcessing(work):
             img.under_crop_minimum = False
             if opt.cropping == 2 and not opt.webtoon:
                 img.cropPageNumber(opt.croppingp, opt.croppingm)
-            if opt.cropping > 0 and not opt.webtoon:
+            if opt.cropping == 1 and not opt.webtoon:
                 img.cropMargin(opt.croppingp, opt.croppingm)
             if opt.interpanelcrop > 0:
                 img.cropInterPanelEmptySections("horizontal" if opt.interpanelcrop == 1 else "both")
@@ -937,6 +939,10 @@ def detectSuboptimalProcessing(tmppath, orgpath):
                     os.remove(os.path.join(root, name))
                 except OSError as e:
                     raise RuntimeError(f"{name}: {e}")
+    # remove empty nested folders
+    for root, dirs, files in os.walk(tmppath, False):
+        if not files and not dirs:
+            os.rmdir(root)
     if alreadyProcessed:
         print("WARNING: Source files are probably created by KCC. The second conversion will decrease quality.")
         if GUI:
@@ -1052,6 +1058,8 @@ def makeParser():
                                     help="Set cropping mode. 0: Disabled 1: Margins 2: Margins + page numbers [Default=2]")
     processing_options.add_argument("--cp", "--croppingpower", type=float, dest="croppingp", default="1.0",
                                     help="Set cropping power [Default=1.0]")
+    processing_options.add_argument("--preservemargin", type=int, dest="preservemargin", default="0",
+                                    help="After calculating crop, back up specified percentage amount. [Default=0]")
     processing_options.add_argument("--cm", "--croppingminimum", type=float, dest="croppingm", default="0.0",
                                     help="Set cropping minimum area ratio [Default=0.0]")
     processing_options.add_argument("--ipc", "--interpanelcrop", type=int, dest="interpanelcrop", default="0",
@@ -1125,6 +1133,9 @@ def checkOptions(options):
         options.batchsplit = 1
     # Older Kindle models don't support Panel View.
     if options.profile == 'K1' or options.profile == 'K2' or options.profile == 'K34' or options.profile == 'KDX':
+        options.panelview = False
+        options.hq = False
+    if options.profile == 'KV' or options.profile in image.ProfileData.ProfilesKindlePDOC.keys():
         options.panelview = False
         options.hq = False
     # Webtoon mode mandatory options

@@ -288,7 +288,8 @@ class ComicPage:
             self.targetPath = os.path.join(path[0], os.path.splitext(path[1])[0]) + '-kcc'
         elif 'R' in mode:
             self.targetPath = os.path.join(path[0], os.path.splitext(path[1])[0]) + '-kcc-a'
-            self.rotated = True
+            if not options.norotate:
+                self.rotated = True
         elif 'S1' in mode:
             self.targetPath = os.path.join(path[0], os.path.splitext(path[1])[0]) + '-kcc-b'
         elif 'S2' in mode:
@@ -389,6 +390,11 @@ class ComicPage:
         return Image.Resampling.LANCZOS
 
     def maybeCrop(self, box, minimum):
+        w, h = self.image.size
+        left, upper, right, lower = box
+        if self.opt.preservemargin:
+            ratio = 1 - self.opt.preservemargin / 100
+            box = left * ratio, upper * ratio, right + (w - right) * (1 - ratio), lower + (h - lower) * (1 - ratio)
         box_area = (box[2] - box[0]) * (box[3] - box[1])
         image_area = self.image.size[0] * self.image.size[1]
         if (box_area / image_area) >= minimum:

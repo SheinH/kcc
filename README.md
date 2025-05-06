@@ -1,3 +1,5 @@
+<img src="header.jpg" alt="Header Image" width="400">
+
 # KCC
 
 
@@ -6,10 +8,13 @@
 [![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/ciromattia/kcc/docker-publish.yml?label=docker%20build)](https://github.com/ciromattia/kcc/pkgs/container/kcc)
 
 **Kindle Comic Converter** optimizes comics and manga for eink readers like Kindle, Kobo, ReMarkable, and more. 
+Pages display in fullscreen without margins, with proper fixed layout support. 
 Its main feature is various optional image processing steps to look good on eink screens, 
 which have different requirements than normal LCD screens.
+It also does filesize optimization by downscaling to your specific device's screen resolution,
+which can improve performance on underpowered ereaders. 
 Supported input formats include folders/CBZ/CBR/PDF of JPG/PNG files and more.
-Supported output formats include MOBI/AZW3, EPUB, KEPUB, and CBZ.
+Supported output formats include virtual panel view MOBI/AZW3, EPUB, KEPUB, and CBZ.
 
 ![image](https://github.com/user-attachments/assets/36ad2131-6677-4559-bd6f-314a90c27218)
 
@@ -26,11 +31,15 @@ If you have some **technical** problems using KCC please [file an issue here](ht
 If you can fix an open issue, fork & make a pull request.
 
 If you find **KCC** valuable you can consider donating to the authors:
-- Ciro Mattia Gonano (founder, active 2013-2014):
-  - [![Donate PayPal](https://img.shields.io/badge/Donate-PayPal-green.svg)](https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=D8WNYNPBGDAS2)
+- Ciro Mattia Gonano (founder, active 2012-2014):
+
+  [![Donate PayPal](https://img.shields.io/badge/Donate-PayPal-green.svg)](https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=D8WNYNPBGDAS2)
+
 - Paweł Jastrzębski (active 2013-2019):
-  - [![Donate PayPal](https://img.shields.io/badge/Donate-PayPal-green.svg)](https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=YTTJ4LK2JDHPS)
-  - [![Donate Bitcoin](https://img.shields.io/badge/Donate-Bitcoin-green.svg)](https://jastrzeb.ski/donate/)
+
+  [![Donate PayPal](https://img.shields.io/badge/Donate-PayPal-green.svg)](https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=YTTJ4LK2JDHPS)
+  [![Donate Bitcoin](https://img.shields.io/badge/Donate-Bitcoin-green.svg)](https://jastrzeb.ski/donate/)
+
 - Alex Xu (active 2023-Present)
 
   [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/Q5Q41BW8HS)
@@ -65,6 +74,9 @@ For flatpak, Docker, and AppImage versions, refer to the wiki: https://github.co
 - Image too dark?
   - The default gamma correction of 1.8 makes the image darker, and is useful for faded/gray artwork/text. Disable by setting gamma = 1.0
 - [Better PDF support (Humble Bundle, Fanatical, etc)](https://github.com/ciromattia/kcc/issues/680)
+- Cannot connect Kindle Scribe or 2024+ Kindle to macOS
+  - Use official MTP [Amazon USB File Transfer app](https://www.amazon.com/gp/help/customer/display.html/ref=hp_Connect_USB_MTP?nodeId=TCUBEdEkbIhK07ysFu)
+    (no login required). Works much better than previously recommended Android File Transfer. Cannot run simutaneously with other transfer apps.
 
 ## PREREQUISITES
 
@@ -173,6 +185,7 @@ PROCESSING:
                         Set cropping mode. 0: Disabled 1: Margins 2: Margins + page numbers [Default=2]
   --cp CROPPINGP, --croppingpower CROPPINGP
                         Set cropping power [Default=1.0]
+  --preservemargin      After calculating crop, "back up" a specified percentage amount [Default=0]
   --cm CROPPINGM, --croppingminimum CROPPINGM
                         Set cropping minimum area ratio [Default=0.0]
   --ipc INTERPANELCROP, --interpanelcrop INTERPANELCROP
@@ -246,6 +259,9 @@ Then use the `gen_ui_files` scripts to autogenerate the python UI.
 
 An example PR adding a new checkbox is here: https://github.com/ciromattia/kcc/pull/785
 
+Do not use `git merge` to merge master from upstream, 
+use the "Sync fork" button on your fork on GitHub in your branch 
+to avoid weird looking merges in pull requests.
 
 ### Windows install from source
 

@@ -40,6 +40,7 @@ from tempfile import gettempdir
 from .shared import HTMLStripper, available_archive_tools, sanitizeTrace, walkLevel, subprocess_run
 from . import __version__
 from . import comic2ebook
+from . import image
 from . import metadata
 from . import kindle
 from . import KCC_ui
@@ -119,6 +120,8 @@ class Icons:
         self.CBZFormat.addPixmap(QPixmap(":/Formats/icons/CBZ.png"), QIcon.Mode.Normal, QIcon.State.Off)
         self.EPUBFormat = QIcon()
         self.EPUBFormat.addPixmap(QPixmap(":/Formats/icons/EPUB.png"), QIcon.Mode.Normal, QIcon.State.Off)
+        self.KFXFormat = QIcon()
+        self.KFXFormat.addPixmap(QPixmap(":/Formats/icons/KFX.png"), QIcon.Normal, QIcon.Off)
 
         self.info = QIcon()
         self.info.addPixmap(QPixmap(":/Status/icons/info.png"), QIcon.Mode.Normal, QIcon.State.Off)
@@ -244,6 +247,7 @@ class WorkerThread(QThread):
         options.cropping = GUI.croppingBox.checkState().value
         if GUI.croppingBox.checkState() != Qt.CheckState.Unchecked:
             options.croppingp = float(GUI.croppingPowerValue)
+            options.preservemargin = GUI.preserveMarginBox.value()
         options.interpanelcrop = GUI.interPanelCropBox.checkState().value
         if GUI.borderBox.checkState() == Qt.CheckState.PartiallyChecked:
             options.white_borders = True
@@ -276,6 +280,8 @@ class WorkerThread(QThread):
             options.output = GUI.targetDirectory
         if GUI.authorEdit.text():
             options.author = str(GUI.authorEdit.text())
+        if GUI.chunkSizeCheckBox.isChecked():
+            options.targetsize = int(GUI.chunkSizeBox.value())
 
         for i in range(GUI.jobList.count()):
             # Make sure that we don't consider any system message as job to do
@@ -603,6 +609,8 @@ class KCCGUI(KCC_ui.Ui_mainWindow):
             GUI.rotateBox.setChecked(False)
             GUI.upscaleBox.setEnabled(False)
             GUI.upscaleBox.setChecked(True)
+            GUI.chunkSizeCheckBox.setEnabled(False)
+            GUI.chunkSizeCheckBox.setChecked(False)
         else:
             profile = GUI.profiles[str(GUI.deviceBox.currentText())]
             if profile['PVOptions']:
@@ -610,11 +618,12 @@ class KCCGUI(KCC_ui.Ui_mainWindow):
             GUI.mangaBox.setEnabled(True)
             GUI.rotateBox.setEnabled(True)
             GUI.upscaleBox.setEnabled(True)
+            GUI.chunkSizeCheckBox.setEnabled(True)
 
     def togglequalityBox(self, value):
         profile = GUI.profiles[str(GUI.deviceBox.currentText())]
         if value == 2:
-            if profile['Label'] in ['KV', 'KO']:
+            if profile['Label'] == 'KV' or profile['Label'] in image.ProfileData.ProfilesKindlePDOC.keys():
                 self.addMessage('This option is intended for older Kindle models.', 'warning')
                 self.addMessage('On this device, quality improvement will be negligible.', 'warning')
             GUI.upscaleBox.setEnabled(False)
@@ -622,6 +631,9 @@ class KCCGUI(KCC_ui.Ui_mainWindow):
         else:
             GUI.upscaleBox.setEnabled(True)
             GUI.upscaleBox.setChecked(profile['DefaultUpscale'])
+    
+    def togglechunkSizeCheckBox(self, value):
+        GUI.chunkSizeWidget.setVisible(value)
 
     def changeGamma(self, value):
         valueRaw = int(5 * round(float(value) / 5))
@@ -655,7 +667,10 @@ class KCCGUI(KCC_ui.Ui_mainWindow):
         if not GUI.webtoonBox.isChecked():
             GUI.qualityBox.setEnabled(profile['PVOptions'])
         GUI.upscaleBox.setChecked(profile['DefaultUpscale'])
-        GUI.mangaBox.setChecked(True)
+        if profile['Label'] == 'KS':
+            GUI.upscaleBox.setDisabled(True)
+        else:
+            GUI.upscaleBox.setEnabled(True)
         if not profile['PVOptions']:
             GUI.qualityBox.setChecked(False)
         if str(GUI.deviceBox.currentText()) == 'Other':
@@ -675,6 +690,12 @@ class KCCGUI(KCC_ui.Ui_mainWindow):
         else:
             GUI.outputSplit.setEnabled(False)
             GUI.outputSplit.setChecked(False)
+        if (GUI.formats[str(GUI.formatBox.currentText())]['format'] == 'EPUB-200MB' or
+            GUI.formats[str(GUI.formatBox.currentText())]['format'] == 'MOBI+EPUB-200MB'):
+            GUI.chunkSizeCheckBox.setEnabled(False)
+            GUI.chunkSizeCheckBox.setChecked(False)
+        elif not GUI.webtoonBox.isChecked():
+            GUI.chunkSizeCheckBox.setEnabled(True)
 
     def stripTags(self, html):
         s = HTMLStripper()
@@ -787,6 +808,7 @@ class KCCGUI(KCC_ui.Ui_mainWindow):
                                            'gammaBox': GUI.gammaBox.checkState().value,
                                            'croppingBox': GUI.croppingBox.checkState().value,
                                            'croppingPowerSlider': float(self.croppingPowerValue) * 100,
+                                           'preserveMarginBox': self.preserveMarginBox.value(),
                                            'interPanelCropBox': GUI.interPanelCropBox.checkState().value,
                                            'upscaleBox': GUI.upscaleBox.checkState().value,
                                            'borderBox': GUI.borderBox.checkState().value,
@@ -802,7 +824,9 @@ class KCCGUI(KCC_ui.Ui_mainWindow):
                                            'spreadShiftBox': GUI.spreadShiftBox.checkState().value,
                                            'noRotateBox': GUI.noRotateBox.checkState().value,
                                            'maximizeStrips': GUI.maximizeStrips.checkState().value,
-                                           'gammaSlider': float(self.gammaValue) * 100})
+                                           'gammaSlider': float(self.gammaValue) * 100,
+                                           'chunkSizeCheckBox': GUI.chunkSizeCheckBox.checkState().value,
+                                           'chunkSizeBox': GUI.chunkSizeBox.value()})
         self.settings.sync()
         self.tray.hide()
 
@@ -920,7 +944,7 @@ class KCCGUI(KCC_ui.Ui_mainWindow):
             "MOBI/AZW3": {'icon': 'MOBI', 'format': 'MOBI'},
             "EPUB": {'icon': 'EPUB', 'format': 'EPUB'},
             "CBZ": {'icon': 'CBZ', 'format': 'CBZ'},
-            "EPUB (Calibre KFX)": {'icon': 'EPUB', 'format': 'KFX'},
+            "KFX (does not work)": {'icon': 'KFX', 'format': 'KFX'},
             "MOBI + EPUB": {'icon': 'MOBI', 'format': 'MOBI+EPUB'},
             "EPUB (200MB limit)": {'icon': 'EPUB', 'format': 'EPUB-200MB'},
             "MOBI + EPUB (200MB limit)": {'icon': 'MOBI', 'format': 'MOBI+EPUB-200MB'},
@@ -928,28 +952,28 @@ class KCCGUI(KCC_ui.Ui_mainWindow):
 
 
         self.profiles = {
-            "Kindle Oasis 9/10": {'PVOptions': True, 'ForceExpert': False, 'DefaultFormat': 0,
+            "Kindle Oasis 9/10": {'PVOptions': False, 'ForceExpert': False, 'DefaultFormat': 0,
                                  'DefaultUpscale': True, 'ForceColor': False, 'Label': 'KO'},
-            "Kindle Oasis 8": {'PVOptions': True, 'ForceExpert': False, 'DefaultFormat': 0,
+            "Kindle Oasis 8": {'PVOptions': False, 'ForceExpert': False, 'DefaultFormat': 0,
                              'DefaultUpscale': True, 'ForceColor': False, 'Label': 'KV'},
-            "Kindle Voyage": {'PVOptions': True, 'ForceExpert': False, 'DefaultFormat': 0,
+            "Kindle Voyage": {'PVOptions': False, 'ForceExpert': False, 'DefaultFormat': 0,
                               'DefaultUpscale': True, 'ForceColor': False, 'Label': 'KV'},
             "Kindle Scribe": {
-                'PVOptions': True, 'ForceExpert': False, 'DefaultFormat': 0, 'DefaultUpscale': False, 'ForceColor': False, 'Label': 'KS',
+                'PVOptions': False, 'ForceExpert': False, 'DefaultFormat': 0, 'DefaultUpscale': False, 'ForceColor': False, 'Label': 'KS',
             },
             "Kindle 11": {
-                'PVOptions': True, 'ForceExpert': False, 'DefaultFormat': 0, 'DefaultUpscale': True, 'ForceColor': False, 'Label': 'K11',
+                'PVOptions': False, 'ForceExpert': False, 'DefaultFormat': 0, 'DefaultUpscale': True, 'ForceColor': False, 'Label': 'K11',
             },
             "Kindle PW 11": {
-                'PVOptions': True, 'ForceExpert': False, 'DefaultFormat': 0, 'DefaultUpscale': True, 'ForceColor': False, 'Label': 'KPW5',
+                'PVOptions': False, 'ForceExpert': False, 'DefaultFormat': 0, 'DefaultUpscale': True, 'ForceColor': False, 'Label': 'KPW5',
             },
             "Kindle PW 12": {
-                'PVOptions': True, 'ForceExpert': False, 'DefaultFormat': 0, 'DefaultUpscale': True, 'ForceColor': False, 'Label': 'KO',
+                'PVOptions': False, 'ForceExpert': False, 'DefaultFormat': 0, 'DefaultUpscale': True, 'ForceColor': False, 'Label': 'KO',
             },
             "Kindle CS 12": {
-                'PVOptions': True, 'ForceExpert': False, 'DefaultFormat': 0, 'DefaultUpscale': True, 'ForceColor': True, 'Label': 'KO',
+                'PVOptions': False, 'ForceExpert': False, 'DefaultFormat': 0, 'DefaultUpscale': True, 'ForceColor': True, 'Label': 'KO',
             },
-            "Kindle PW 7/10": {'PVOptions': True, 'ForceExpert': False, 'DefaultFormat': 0,
+            "Kindle PW 7/10": {'PVOptions': False, 'ForceExpert': False, 'DefaultFormat': 0,
                               'DefaultUpscale': True, 'ForceColor': False, 'Label': 'KV'},
             "Kindle PW 5/6": {'PVOptions': True, 'ForceExpert': False, 'DefaultFormat': 0,
                               'DefaultUpscale': False, 'ForceColor': False, 'Label': 'KPW'},
@@ -1088,6 +1112,7 @@ class KCCGUI(KCC_ui.Ui_mainWindow):
         GUI.croppingPowerSlider.valueChanged.connect(self.changeCroppingPower)
         GUI.webtoonBox.stateChanged.connect(self.togglewebtoonBox)
         GUI.qualityBox.stateChanged.connect(self.togglequalityBox)
+        GUI.chunkSizeCheckBox.stateChanged.connect(self.togglechunkSizeCheckBox)
         GUI.deviceBox.activated.connect(self.changeDevice)
         GUI.formatBox.activated.connect(self.changeFormat)
         MW.progressBarTick.connect(self.updateProgressbar)
@@ -1140,6 +1165,9 @@ class KCCGUI(KCC_ui.Ui_mainWindow):
                 if GUI.croppingPowerSlider.isEnabled():
                     GUI.croppingPowerSlider.setValue(int(self.options[option]))
                     self.changeCroppingPower(int(self.options[option]))
+                    GUI.preserveMarginBox.setValue(self.options.get('preserveMarginBox', 0))
+            elif str(option) == "chunkSizeBox":
+                GUI.chunkSizeBox.setValue(int(self.options[option]))
             else:
                 try:
                     if getattr(GUI, option).isEnabled():
