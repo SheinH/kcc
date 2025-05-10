@@ -33,6 +33,7 @@ from tempfile import mkdtemp, gettempdir, TemporaryFile
 from shutil import move, copytree, rmtree, copyfile
 from multiprocessing import Pool
 from uuid import uuid4
+
 from natsort import os_sort_keygen
 from slugify import slugify as slugify_ext
 from PIL import Image, ImageFile
@@ -40,6 +41,7 @@ from subprocess import STDOUT, PIPE
 from psutil import virtual_memory, disk_usage
 from html import escape as hescape
 
+from .image import atkinson_quantize
 from .shared import available_archive_tools, getImageFileName, walkSort, walkLevel, sanitizeTrace, subprocess_run
 from . import comic2panel
 from . import image
@@ -973,7 +975,6 @@ def slugify(value):
 
 def makeZIP(zipfilename, basedir, isepub=False):
     start = perf_counter()
-    mogrifyTo4Bit(basedir)
     zipfilename = os.path.abspath(zipfilename) + '.zip'
     if '7z' in available_archive_tools():
         if isepub:
@@ -1206,18 +1207,6 @@ def checkPre(source):
             pass
     except Exception:
         raise UserWarning("Target directory is not writable.")
-
-def mogrifyTo4Bit(path):
-    try:
-        subprocess_run(['mogrify',
-                        "-colorspace", "gray",
-                        "-dither", "FloydSteinberg",
-                        "-colors", "16",
-                        "-depth", "4",
-                        "-compress", "Zip",
-                        os.path.join(path, '*')], stdout=PIPE, stderr=STDOUT)
-    except Exception as err:
-        raise RuntimeError('Failed to process images with mogrify: %s' % str(err))
 
 
 def makeBook(source, qtgui=None):

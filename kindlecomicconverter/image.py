@@ -23,8 +23,14 @@ import os
 from pathlib import Path
 import mozjpeg_lossless_optimization
 from PIL import Image, ImageOps, ImageStat, ImageChops, ImageFilter
+
+from .dither import dither_to_16_gray_levels
 from .page_number_crop_alg import get_bbox_crop_margin_page_number, get_bbox_crop_margin
+import png
 from .inter_panel_crop_alg import crop_empty_inter_panel
+import numpy as np
+import ctypes
+import time
 
 AUTO_CROP_THRESHOLD = 0.015
 
@@ -132,6 +138,282 @@ class ProfileData:
         **ProfilesRemarkable,
         'OTHER': ("Other", (0, 0), Palette16, 1.8),
     }
+
+_libname = "../libatkinson.dylib"  # or "libatkinson.dylib" / "atkinson.dll"
+_libpath = os.path.join(os.path.dirname(__file__), _libname)
+lib = ctypes.CDLL(_libpath)
+
+# 2) Tell ctypes about the function signature
+lib.atkinson_dither.argtypes = [
+    ctypes.POINTER(ctypes.c_uint8),  # in_rgb
+    ctypes.POINTER(ctypes.c_uint8),  # out_idx
+    ctypes.POINTER(ctypes.c_uint8),  # palette
+    ctypes.c_int,  # width
+    ctypes.c_int,  # height
+    ctypes.c_int   # n_colors
+]
+lib.atkinson_dither.restype = None
+
+lib.jjn_dither.argtypes = [
+    ctypes.POINTER(ctypes.c_uint8),  # in_rgb
+    ctypes.POINTER(ctypes.c_uint8),  # out_idx
+    ctypes.POINTER(ctypes.c_uint8),  # palette
+    ctypes.c_int,  # width
+    ctypes.c_int,  # height
+    ctypes.c_int   # n_colors
+]
+lib.atkinson_dither.restype = None
+
+
+rgb_to_linear = None
+def srgb_to_linear_lookup_table():
+    """
+    Computes a lookup table mapping sRGB color values (0-255)
+    to linear floating point light values.
+
+    The sRGB to linear conversion formula is:
+    - L = S / 12.92, if S <= 0.04045
+    - L = ((S + 0.055) / 1.055) ** 2.4, if S > 0.04045
+    where S is the normalized sRGB value (sRGB_value / 255.0).
+
+    Returns:
+        numpy.ndarray: A 256-element array where the index represents
+                       index is the corresponding linear light value.
+    """
+    global rgb_to_linear
+    if rgb_to_linear:
+        return rgb_to_linear
+    # Create an array of sRGB integer values from 0 to 255
+    srgb_int_values = np.arange(256)
+
+    # Normalize sRGB values to the range [0, 1]
+    s_values = srgb_int_values / 255.0
+
+    # Initialize an empty array for linear values
+    linear_values = np.zeros_like(s_values, dtype=float)
+
+    # Condition for the first part of the formula
+    condition1 = s_values <= 0.04045
+
+    # Apply the first part of the formula
+    linear_values[condition1] = s_values[condition1] / 12.92
+
+    # Condition for the second part of the formula (implicitly where condition1 is False)
+    condition2 = ~condition1 # or s_values > 0.04045
+
+    # Apply the second part of the formula
+    linear_values[condition2] = ((s_values[condition2] + 0.055) / 1.055) ** 2.4
+    rgb_to_linear = linear_values
+
+    return linear_values
+
+
+
+def atkinson_quantize(img: Image.Image, pal: Image.Image) -> Image.Image:
+    """
+    img : RGB Pillow Image
+    pal : mode 'P' palette image, with <=16 colors defined
+    """
+    # ensure modes
+    img = img.convert("RGB")
+    pal = pal.convert("P")
+    # get raw pixel data
+    W, H = img.size
+    in_arr = np.frombuffer(img.tobytes(), dtype=np.uint8)
+    # load palette (first n_colors*3 bytes)
+    raw_pal = pal.palette.palette  # 768 bytes max
+    # detect how many entries are actually used:
+    # you can set n_colors manually if you know it
+    # here we assume <=16
+    n_colors = 16
+    pal_arr = np.frombuffer(raw_pal[:n_colors*3], dtype=np.uint8)
+
+    # prepare output index buffer
+    out_idx = np.zeros((H*W,), dtype=np.uint8)
+
+    # call into C++
+    lib.atkinson_dither(
+        in_arr.ctypes.data_as(ctypes.POINTER(ctypes.c_uint8)),
+        out_idx.ctypes.data_as(ctypes.POINTER(ctypes.c_uint8)),
+        pal_arr.ctypes.data_as(ctypes.POINTER(ctypes.c_uint8)),
+        W,
+        H,
+        n_colors
+    )
+
+    # wrap back into a P‑mode Image
+    quant = Image.fromarray(out_idx.reshape((H, W)), mode="P")
+    quant.putpalette(raw_pal)  # attach full 768-byte palette
+    return quant
+
+def jjn_quantize(img: Image.Image, pal: Image.Image) -> Image.Image:
+    """
+    img : RGB Pillow Image
+    pal : mode 'P' palette image, with <=16 colors defined
+    """
+    # ensure modes
+    img = img.convert("RGB")
+    pal = pal.convert("P")
+    # get raw pixel data
+    W, H = img.size
+    in_arr = np.frombuffer(img.tobytes(), dtype=np.uint8)
+    # load palette (first n_colors*3 bytes)
+    raw_pal = pal.palette.palette  # 768 bytes max
+    # detect how many entries are actually used:
+    # you can set n_colors manually if you know it
+    # here we assume <=16
+    n_colors = 16
+    pal_arr = np.frombuffer(raw_pal[:n_colors*3], dtype=np.uint8)
+
+    # prepare output index buffer
+    out_idx = np.zeros((H*W,), dtype=np.uint8)
+
+    # call into C++
+    lib.jjn_dither(
+        in_arr.ctypes.data_as(ctypes.POINTER(ctypes.c_uint8)),
+        out_idx.ctypes.data_as(ctypes.POINTER(ctypes.c_uint8)),
+        pal_arr.ctypes.data_as(ctypes.POINTER(ctypes.c_uint8)),
+        W,
+        H,
+        n_colors
+    )
+
+    # wrap back into a P‑mode Image
+    quant = Image.fromarray(out_idx.reshape((H, W)), mode="P")
+    quant.putpalette(raw_pal)  # attach full 768-byte palette
+    return quant
+
+def _atkinson_dither_paletted_numpy(rgb_array: np.ndarray, palette_array: np.ndarray) -> np.ndarray:
+    """
+    Core Atkinson dithering logic operating on NumPy arrays.
+    rgb_array:     Input image as an (H, W, 3) NumPy array of float32.
+    palette_array: Palette as an (P, 3) NumPy array of float32.
+    returns:       (H, W) NumPy array of uint8 palette indices.
+    """
+    H, W = rgb_array.shape[:2]
+    # P = palette_array.shape[0] # Number of colors in palette, not directly used in this optimized version of loop
+
+    # Error buffer, initialized to zeros.
+    # It stores the error propagated from previous pixels.
+    err = np.zeros_like(rgb_array, dtype=np.float32)
+
+    # Output array for palette indices.
+    idxs = np.zeros((H, W), dtype=np.uint8)
+
+    # Iterate over each row of the image.
+    for y in range(H):
+        # Current row's pixel values plus accumulated error from previous calculations.
+        row = rgb_array[y] + err[y]
+        # Clip values to be within the valid 0-255 range.
+        np.clip(row, 0, 255, out=row)
+
+        # --- Find nearest palette color for each pixel in the row ---
+        # `row` is (W, 3). `palette_array` is (P, 3).
+        # We want to find, for each pixel in `row`, which of the P palette colors is closest.
+        # `palette_array[None, :, :]` reshapes palette to (1, P, 3).
+        # `row[:, None, :]` reshapes row to (W, 1, 3).
+        # Broadcasting subtraction: `diffs` becomes (W, P, 3), storing R,G,B differences.
+        diffs = palette_array[None, :, :] - row[:, None, :]
+        # Square the differences and sum along the color axis (axis=2) to get squared Euclidean distance.
+        # `d2` shape is (W, P), storing squared distance of each pixel to each palette color.
+        d2 = (diffs * diffs).sum(axis=2)
+
+        # For each pixel, find the index of the palette color with the minimum distance.
+        # `nearest` shape is (W,), containing palette indices for the current row.
+        nearest_indices = np.argmin(d2, axis=1)
+        idxs[y] = nearest_indices.astype(np.uint8)  # Store the palette indices
+
+        # Get the actual color values for the new row from the palette.
+        # `new_row` shape is (W, 3).
+        new_row_colors = palette_array[nearest_indices]
+
+        # --- Calculate quantization error ---
+        # This is the difference between the (original + diffused error) color and the chosen palette color.
+        # The error is divided by 8 for Atkinson dithering.
+        qerr = (row - new_row_colors) / 8.0  # Shape (W, 3)
+
+        # --- Diffuse the error to neighboring pixels ---
+        # Current row, pixels to the right
+        if W > 1:  # x+1
+            err[y, 1:] += qerr[:-1]
+        if W > 2:  # x+2
+            err[y, 2:] += qerr[:-2]
+
+        # Next row (y+1)
+        if y + 1 < H:
+            if W > 1:  # x-1 (on next row)
+                err[y + 1, :-1] += qerr[1:]
+            err[y + 1, :] += qerr  # x (on next row)
+            if W > 1:  # x+1 (on next row)
+                err[y + 1, 1:] += qerr[:-1]
+
+        # Row after next (y+2)
+        if y + 2 < H:
+            err[y + 2, :] += qerr  # x (on row y+2)
+
+    return idxs
+
+
+# This is the wrapper function that KCC will call
+def atkinson_dither_paletted(im: Image.Image, palette: list) -> Image.Image:
+    """
+    Applies Atkinson dithering to an image using a specified palette.
+    im:      Pillow Image object (any mode, will be converted to RGB).
+    palette: Can be a list of (R,G,B) tuples OR a flat list of R,G,B values.
+             Up to 256 colors.
+    returns: A P-mode Pillow Image, dithered with Atkinson, using the provided palette.
+    """
+    # This print statement can be useful for debugging.
+    # print("Atkinson dithering called!")
+
+    # --- 1. Prepare NumPy arrays from inputs ---
+    # Convert the input Pillow image to an RGB NumPy array of float32.
+    # Numba works best with NumPy arrays.
+    rgb_np = np.asarray(im.convert('RGB'), dtype=np.float32)
+
+    # Convert the input palette to a NumPy array of float32.
+    # The palette can be a list of tuples or a flat list.
+    # This code block normalizes it to an (P, 3) array.
+    pal_np = np.array(palette, dtype=np.float32)
+    if pal_np.ndim == 1:  # If palette is a flat list [r,g,b,r,g,b,...]
+        if pal_np.shape[0] % 3 == 0 and pal_np.shape[0] <= 256 * 3:
+            pal_np = pal_np.reshape(-1, 3)  # Reshape to (P, 3)
+        else:
+            raise ValueError(
+                "Flat palette must have a number of elements divisible by 3 and represent at most 256 colors.")
+    elif pal_np.ndim == 2:  # If palette is already list of lists/tuples [[r,g,b],...]
+        if pal_np.shape[1] != 3 or pal_np.shape[0] > 256:
+            raise ValueError("2D palette must have 3 columns (R,G,B) and at most 256 colors.")
+    else:
+        raise ValueError("Palette format is not recognized. Must be convertible to (P,3) NumPy array.")
+
+    # --- 2. Call the Numba-optimized dithering function ---
+    # This function performs the core dithering logic.
+    idxs_np = _atkinson_dither_paletted_numpy(rgb_np, pal_np)
+
+    # --- 3. Pack the result into a P-mode Pillow Image ---
+    # `idxs_np` contains the palette indices for each pixel.
+    # `Image.fromarray` creates a Pillow image from the NumPy array.
+    out_image = Image.fromarray(idxs_np, mode='P')
+
+    # Prepare the palette for `out_image.putpalette()`.
+    # It needs a flat list of integers: [r1,g1,b1,r2,g2,b2,..., 0,0,0,...] up to 256*3=768 values.
+    P_colors = pal_np.shape[0]  # Number of actual colors in the palette
+
+    # Take the first P_colors from pal_np, convert to uint8, flatten, and convert to list.
+    # This ensures we are using the processed palette data correctly.
+    flat_palette_values = pal_np[:P_colors].astype(np.uint8).flatten().tolist()
+
+    # Create padding if the palette has fewer than 256 colors.
+    padding = [0, 0, 0] * (256 - P_colors)
+
+    # Combine the actual palette values with the padding.
+    final_palette_for_image = flat_palette_values + padding
+
+    # Apply the palette to the output image.
+    out_image.putpalette(final_palette_for_image)
+
+    return out_image
 
 
 class ComicPageParser:
@@ -308,9 +590,39 @@ class ComicPage:
             if self.fill != 'white':
                 flags.append('BlackBackground')
             if self.opt.forcepng:
-                self.image.info["transparency"] = None
-                self.targetPath += '.png'
-                self.image.save(self.targetPath, 'PNG', optimize=1)
+                img_for_pypng = self.image  # Start with the current state of self.image
+
+                # self.palette is the palette object used by the quantizeImage() method for this page,
+                # taken from self.opt.profileData.
+                # ProfileData.Palette16 is our specific target palette for the 4-bit PNG output.
+
+                if img_for_pypng.mode == 'P' and self.palette == ProfileData.Palette16:
+                    self.image.info["transparency"] = None
+                    self.targetPath += '.png'
+
+                    self.image.save(self.targetPath, 'PNG', optimize=1)
+                else:
+
+                    width = img_for_pypng.width
+                    height = img_for_pypng.height
+
+                    pypng_target_palette_tuples = [tuple(ProfileData.Palette16[i:i + 3])
+                                                   for i in range(0, len(ProfileData.Palette16), 3)]
+
+                    raw_pixel_data = list(img_for_pypng.getdata())  # This is your "python array" of indices
+                    pixels_by_row = [raw_pixel_data[i * width:(i + 1) * width]
+                                     for i in range(height)]
+
+                    # Now, write using pypng
+                    with open(self.targetPath + ".png", 'wb') as f:
+                        writer = png.Writer(
+                            width,
+                            height,
+                            palette=pypng_target_palette_tuples,
+                            bitdepth=4  # Explicitly 4-bit
+                        )
+                        writer.write(f, pixels_by_row)  # "save that shit" :)
+
             else:
                 self.targetPath += '.jpg'
                 if self.opt.mozjpeg:
@@ -339,16 +651,27 @@ class ComicPage:
         else:
             self.image = ImageOps.autocontrast(Image.eval(self.image, lambda a: int(255 * (a / 255.) ** gamma)))
 
+
     def quantizeImage(self):
         colors = len(self.palette) // 3
         if colors < 256:
             self.palette += self.palette[:3] * (256 - colors)
         palImg = Image.new('P', (1, 1))
         palImg.putpalette(self.palette)
-        self.image = self.image.convert('L')
-        self.image = self.image.convert('RGB')
+        # self.image = self.image.convert('L')
+        # self.image = self.image.convert('RGB')
         # Quantize is deprecated but new function call it internally anyway...
-        self.image = self.image.quantize(palette=palImg)
+        # self.image = self.image.quantize(palette=palImg)
+        # self.image = atkinson_dither_paletted(self.image,self.palette)
+        start_time = time.perf_counter()
+        print(self.palette)
+        # if len(self.palette) == 16:
+        self.image = dither_to_16_gray_levels(self.image)
+        # else:
+        #     self.image = jjn_quantize(self.image, palImg)
+        end_time = time.perf_counter()
+
+        print(f"Execution time: {end_time - start_time:.6f} seconds")
 
     def optimizeForDisplay(self, reducerainbow):
         # Reduce rainbow artifacts for grayscale images by breaking up dither patterns that cause Moire interference with color filter array
