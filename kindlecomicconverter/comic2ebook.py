@@ -41,7 +41,6 @@ from subprocess import STDOUT, PIPE
 from psutil import virtual_memory, disk_usage
 from html import escape as hescape
 
-from .image import atkinson_quantize
 from .shared import available_archive_tools, getImageFileName, walkSort, walkLevel, sanitizeTrace, subprocess_run
 from . import comic2panel
 from . import image
