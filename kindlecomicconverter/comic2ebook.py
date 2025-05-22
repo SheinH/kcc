@@ -983,7 +983,7 @@ def makeZIP(zipfilename, basedir, isepub=False):
             mimetypeFile.close()
         subprocess_run(['7z', 'a', '-tzip', zipfilename, os.path.join(basedir, "*")], capture_output=True, check=True)
     else:
-        zipOutput = ZipFile(zipfilename, 'w', ZIP_DEFLATED)
+        zipOutput = ZipFile(zipfilename, 'w', ZIP_STORED)
         if isepub:
             zipOutput.writestr('mimetype', 'application/epub+zip', ZIP_STORED)
         for dirpath, _, filenames in os.walk(basedir):
