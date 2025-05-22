@@ -308,6 +308,8 @@ class ComicPage:
         # backwards compatibility for Pillow >9.1.0
         if not hasattr(Image, 'Resampling'):
             Image.Resampling = Image
+        self.lastPalette = None
+        self.lastPaletteImage = None
 
     def saveToDir(self):
         try:
@@ -324,33 +326,23 @@ class ComicPage:
                 # self.palette is the palette object used by the quantizeImage() method for this page,
                 # taken from self.opt.profileData.
                 # ProfileData.Palette16 is our specific target palette for the 4-bit PNG output.
-
                 if img_for_pypng.mode == 'P' and self.palette == ProfileData.Palette16:
+                    pixel_indices_np = np.array(img_for_pypng, dtype=np.uint8)
+                    pypng_target_palette_tuples = [tuple(ProfileData.Palette16[i:i + 3])
+                                                   for i in range(0, len(ProfileData.Palette16), 3)]
+                    with open(self.targetPath + ".png", 'wb') as f:
+                        writer = png.Writer(
+                            img_for_pypng.width,
+                            img_for_pypng.height,
+                            palette=pypng_target_palette_tuples,
+                            bitdepth=4  # Explicitly 4-bit
+                        )
+                        writer.write(f, pixel_indices_np)  # "save that shit" :)
+                else:
                     self.image.info["transparency"] = None
                     self.targetPath += '.png'
 
                     self.image.save(self.targetPath, 'PNG', optimize=1)
-                else:
-
-                    width = img_for_pypng.width
-                    height = img_for_pypng.height
-
-                    pypng_target_palette_tuples = [tuple(ProfileData.Palette16[i:i + 3])
-                                                   for i in range(0, len(ProfileData.Palette16), 3)]
-
-                    raw_pixel_data = list(img_for_pypng.getdata())  # This is your "python array" of indices
-                    pixels_by_row = [raw_pixel_data[i * width:(i + 1) * width]
-                                     for i in range(height)]
-
-                    # Now, write using pypng
-                    with open(self.targetPath + ".png", 'wb') as f:
-                        writer = png.Writer(
-                            width,
-                            height,
-                            palette=pypng_target_palette_tuples,
-                            bitdepth=4  # Explicitly 4-bit
-                        )
-                        writer.write(f, pixels_by_row)  # "save that shit" :)
 
             else:
                 self.targetPath += '.jpg'
@@ -380,26 +372,8 @@ class ComicPage:
         else:
             self.image = ImageOps.autocontrast(Image.eval(self.image, lambda a: int(255 * (a / 255.) ** gamma)))
 
-
     def quantizeImage(self):
-        colors = len(self.palette) // 3
-        if colors < 256:
-            self.palette += self.palette[:3] * (256 - colors)
-        palImg = Image.new('P', (1, 1))
-        palImg.putpalette(self.palette)
-        # self.image = self.image.convert('L')
-        # self.image = self.image.convert('RGB')
-        # Quantize is deprecated but new function call it internally anyway...
-        # self.image = self.image.quantize(palette=palImg)
-        # self.image = atkinson_dither_paletted(self.image,self.palette)
-        start_time = time.perf_counter()
-        # if len(self.palette) == 16:
         self.image = dither_to_gray_levels(self.image)
-        # else:
-        #     self.image = jjn_quantize(self.image, palImg)
-        end_time = time.perf_counter()
-
-        print(f"Execution time: {end_time - start_time:.6f} seconds")
 
     def optimizeForDisplay(self, reducerainbow):
         # Reduce rainbow artifacts for grayscale images by breaking up dither patterns that cause Moire interference with color filter array
