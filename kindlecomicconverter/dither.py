@@ -1,156 +1,147 @@
-import functools
-from typing import Tuple
-
 import numpy as np
 from PIL import Image
 
-############################################################
-#  Blue‑noise dithering – linear‑light, palette‑cached      #
-#  Supports arbitrary gray levels and optional TPDF noise.  #
-############################################################
+# --- Gamma Conversion Lookup Table ---
+_rgb_to_linear_lut_cache = None
 
-##############################################################################
-# 1.  sRGB ↔ linear helpers
-##############################################################################
+def srgb_to_linear_lookup_table():
+    """
+    Returns a lookup table mapping sRGB (0-255) to linear light (0.0-1.0).
+    """
+    global _rgb_to_linear_lut_cache
+    if _rgb_to_linear_lut_cache is not None:
+        return _rgb_to_linear_lut_cache
 
-_rgb_to_linear_lut: np.ndarray | None = None
+    srgb = np.arange(256, dtype=np.float64) / 255.0
+    linear = np.where(
+        srgb <= 0.04045,
+        srgb / 12.92,
+        ((srgb + 0.055) / 1.055) ** 2.4
+    )
+    _rgb_to_linear_lut_cache = linear.astype(np.float32)
+    return _rgb_to_linear_lut_cache
 
+# --- Linear Grayscale Conversion ---
 
-def srgb_to_linear_lut() -> np.ndarray:
-    """Return / memoize a 256‑entry LUT mapping 8‑bit sRGB → linear [0,1]."""
-    global _rgb_to_linear_lut
-    if _rgb_to_linear_lut is None:
-        srgb = np.arange(256, dtype=np.float64) / 255.0
-        linear = np.where(
-            srgb <= 0.04045,
-            srgb / 12.92,
-            ((srgb + 0.055) / 1.055) ** 2.4,
-        )
-        _rgb_to_linear_lut = linear.astype(np.float32)
-    return _rgb_to_linear_lut
-
-
-def rgb_to_grayscale_linear(rgb_lin: np.ndarray) -> np.ndarray:
-    """ITU‑R BT.709 luminance (linear domain). rgb_lin shape = (H,W,3)."""
+def rgb_to_grayscale_linear(rgb_lin):
+    """
+    Converts an (H,W,3) linear RGB array to an (H,W) linear grayscale array.
+    """
     return (
         0.2126 * rgb_lin[..., 0] +
         0.7152 * rgb_lin[..., 1] +
         0.0722 * rgb_lin[..., 2]
     )
 
-##############################################################################
-# 2.  Blue‑noise loader (verifies zero‑mean)
-##############################################################################
+_noise_image = None
 
-_noise_tile: np.ndarray | None = None
-
-
-def get_noise_tile(path: str = "LDR_LLL1_0.png") -> np.ndarray:
-    """Load a blue‑noise image, cache it, ensure mean ≈ 0.5."""
-    global _noise_tile
-    if _noise_tile is None:
-        tile = Image.open(path).convert("L")
-        tile = np.asarray(tile, dtype=np.float32) / 255.0
-        if abs(tile.mean() - 0.5) > 1e-3:
+def get_noise_image(path="LDR_LLL1_0.png"):
+    """
+    Loads and caches a blue‑noise texture as an (H,W) float32 array in [0,1].
+    Verifies that its mean is ~0.5 (needed for unbiased dithering).
+    """
+    global _noise_image
+    if _noise_image is None:
+        bn_pil = Image.open(path).convert("L")
+        bn = np.asarray(bn_pil, dtype=np.float32) / 255.0
+        mean = float(bn.mean())
+        if abs(mean - 0.5) > 1e-3:
             raise ValueError(
-                f"Blue‑noise mean {tile.mean():.4f}; expected ≈0.5 for unbiased dithering."
+                f"Blue‑noise texture mean={mean:.4f}, expected ≈0.5"
             )
-        _noise_tile = tile
-    return _noise_tile
+        _noise_image = bn
+    return _noise_image
 
-##############################################################################
-# 3.  Palette memoisation
-##############################################################################
-
-_palette_cache: dict[int, Tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
-
-
-def get_gray_palette(num_levels: int, lut: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Return (palette_srgb, palette_lin, half_steps) – memoised by num_levels."""
-    if num_levels in _palette_cache:
-        return _palette_cache[num_levels]
-
-    palette_srgb = np.linspace(0, 255, num_levels, dtype=np.uint8)
-    palette_lin = lut[palette_srgb]
-    half_steps = (palette_lin[1:] - palette_lin[:-1]) * 0.5
-    _palette_cache[num_levels] = (palette_srgb, palette_lin, half_steps)
-    return _palette_cache[num_levels]
-
-##############################################################################
-# 4.  Main dithering routine
-##############################################################################
+# --- Dithering with luminance‑adaptive blue‑noise ---
 
 def dither_to_gray_levels(
-    img_srgb: Image.Image,
-    num_levels: int = 16,
-    use_tpdf_noise: bool = False,
-) -> Image.Image:
-    """Return a paletted PIL image dithered to `num_levels` gray levels.
+        img_input_srgb_pil: Image.Image, num_levels: int = 16):
+    # Convert PIL image to numpy array
+    img_srgb = np.asarray(img_input_srgb_pil, dtype=np.uint8)
 
-    * Linear‑light fidelity via sRGB → linear LUT.
-    * Noise amplitude = local half‑step (perceptual weighting).
-    * Pure 0/255 pixels bypass dithering (keeps solid blacks/whites).
-    * Blue‑noise is optional TPDF (sum of two shifted tiles).
-    """
-    lut = srgb_to_linear_lut()
-    palette_srgb, palette_lin, half_steps = get_gray_palette(num_levels, lut)
+    # Create mask for pure black and pure white pixels
+    pure_black_mask = np.all(img_srgb == 0, axis=2)
+    pure_white_mask = np.all(img_srgb == 255, axis=2)
+    no_dither_mask = pure_black_mask | pure_white_mask
 
-    # ---------- load source image ----------
-    src = np.asarray(img_srgb, dtype=np.uint8)
-    H, W, _ = src.shape
+    # Convert to linear space using lookup table
+    lut = srgb_to_linear_lookup_table()
+    img_linear = lut[img_srgb]
 
-    # Masks for solid extremes (no dithering needed)
-    is_black = np.all(src == 0, axis=2)
-    is_white = np.all(src == 255, axis=2)
-    needs_dither = ~(is_black | is_white)
+    # Convert to grayscale in linear space
+    gray_linear = rgb_to_grayscale_linear(img_linear)
 
-    # Convert only the pixels that need processing
-    lin_rgb = lut[src]
-    gray_lin = rgb_to_grayscale_linear(lin_rgb)
+    # Create palette evenly spaced in sRGB space
+    palette_srgb = np.linspace(0, 1, num_levels, dtype=np.float32)
 
-    # ---------- noise tile ----------
-    tile = get_noise_tile()
-    y = np.arange(H)[:, None] % tile.shape[0]
-    x = np.arange(W)[None, :] % tile.shape[1]
-    if use_tpdf_noise:
-        noise = 0.5 * (
-            tile[y, x] +
-            tile[(y + 17) % tile.shape[0], (x + 31) % tile.shape[1]]
-        )
-    else:
-        noise = tile[y, x]
+    # Convert sRGB palette to linear space
+    palette_linear = np.where(
+        palette_srgb <= 0.04045,
+        palette_srgb / 12.92,
+        ((palette_srgb + 0.055) / 1.055) ** 2.4
+    )
 
-    # ---------- interval lookup ----------
-    idx = np.searchsorted(palette_lin, gray_lin, side="right") - 1
-    idx = np.clip(idx, 0, num_levels - 2)
-    half = half_steps[idx]
+    # Convert each pixel's linear luminance back to sRGB to find which interval it falls in
+    gray_srgb = np.where(
+        gray_linear <= 0.0031308,
+        gray_linear * 12.92,
+        1.055 * (gray_linear ** (1.0 / 2.4)) - 0.055
+    )
 
-    # ---------- add noise (brightness‑preserving) ----------
-    dithered = gray_lin.copy()
-    dithered[needs_dither] += (noise[needs_dither] - 0.5) * 2.0 * half[needs_dither]
-    np.clip(dithered, 0.0, 1.0, out=dithered)
+    # Find which sRGB quantization interval each pixel falls into
+    scaled_srgb = gray_srgb * (num_levels - 1)
+    lower_level_idx = np.floor(scaled_srgb).astype(np.int32)
+    lower_level_idx = np.clip(lower_level_idx, 0, num_levels - 2)
+    upper_level_idx = lower_level_idx + 1
 
-    # ---------- quantise ----------
-    out_idx = np.empty((H, W), dtype=np.uint8)
-    out_idx[is_black] = 0
-    out_idx[is_white] = num_levels - 1
+    # Get the linear luminance values for the levels below and above each pixel
+    lower_luminance = palette_linear[lower_level_idx]
+    upper_luminance = palette_linear[upper_level_idx]
 
-    work_mask = needs_dither
-    if work_mask.any():
-        diff = np.abs(palette_lin[None, None, :] - dithered[..., None])
-        out_idx[work_mask] = np.argmin(diff, axis=2)[work_mask].astype(np.uint8)
+    # Calculate the luminance difference between adjacent levels for each pixel
+    level_difference = upper_luminance - lower_luminance
 
-    # ---------- pack into paletted image ----------
-    pal_rgb = np.repeat(palette_srgb[:, None], 3, axis=1).flatten().tolist()
-    out = Image.fromarray(out_idx, mode="P")
-    out.putpalette(pal_rgb)
-    return out
+    # Get blue noise pattern
+    noise = get_noise_image()
+    h, w = gray_linear.shape
 
-##############################################################################
-# 5.  Convenience: LRU‑cached wrapper (keeps most recent palette)            #
-##############################################################################
+    # Tile the noise to match image dimensions
+    noise_h, noise_w = noise.shape
+    noise_tiled = np.tile(noise, (h // noise_h + 1, w // noise_w + 1))[:h, :w]
 
-@functools.lru_cache(maxsize=4)
-def dithering_wrapper(path: str, levels: int = 16) -> Image.Image:
-    """Example helper that caches most‑recent palettes & results."""
-    return dither_to_gray_levels(Image.open(path).convert("RGB"), num_levels=levels)
+    # Scale noise from [0,1] to [-0.5, 0.5] for unbiased dithering
+    noise_centered = noise_tiled - 0.5
+
+    # Scale the noise by the level difference for each pixel
+    scaled_noise = noise_centered * level_difference
+
+    # Apply dithering only where not masked
+    dithered = gray_linear.copy()
+    dithered[~no_dither_mask] += scaled_noise[~no_dither_mask]
+
+    # Clamp to [0,1]
+    dithered = np.clip(dithered, 0.0, 1.0)
+
+    # Convert dithered linear back to sRGB for quantization
+    dithered_srgb = np.where(
+        dithered <= 0.0031308,
+        dithered * 12.92,
+        1.055 * (dithered ** (1.0 / 2.4)) - 0.055
+    )
+
+    # Quantize in sRGB space
+    level_indices = np.round(dithered_srgb * (num_levels - 1))
+
+    # Convert palette back to sRGB for display
+    palette_srgb_display = np.round(palette_srgb * 255).astype(np.uint8)
+
+    # Create output image data
+    data = level_indices.astype(np.uint8)
+
+    # Create palette for PIL (RGB format)
+    palette_rgb = np.repeat(
+        palette_srgb_display[:, None], 3, axis=1
+    ).flatten().tolist()
+    out_pil = Image.fromarray(data, mode="P")
+    out_pil.putpalette(palette_rgb)
+    return out_pil
